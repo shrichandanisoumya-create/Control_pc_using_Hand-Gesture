@@ -4,7 +4,6 @@
 # COPYRIGHT (C) 2026 SOUMYA SHRICHANDANI. ALL RIGHTS RESERVED.
 # ==============================================================================
 
-
 import cv2
 import numpy as np
 from collections import deque
@@ -13,12 +12,13 @@ from gesture_v3 import config
 class CinematicHUD:
     """
     UI Layer.
-    Renders "Iron Man" style overlay.
+    Renders "Iron Man" style overlay with anti-flicker trail buffering.
     """
     def __init__(self):
         # Trail history
         self.trail = deque(maxlen=20)
         self.pulse_phase = 0.0
+        self.lost_frames = 0
 
     def draw(self, img, hand_landmarks, state, confidence):
         """
@@ -29,9 +29,13 @@ class CinematicHUD:
         :param confidence: Gesture Confidence (0-1)
         """
         if not hand_landmarks:
-            self.trail.clear()
+            self.lost_frames += 1
+            # Only clear trail after sustained hand loss to prevent flicker
+            if self.lost_frames > 8:
+                self.trail.clear()
             return
             
+        self.lost_frames = 0
         h, w, _ = img.shape
         
         # Center of palm (approx)

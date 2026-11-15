@@ -681,7 +681,8 @@ class DesktopOverlay:
 
     def update(self):
         try:
-            self._render_hud_pill()
+            if self.is_visible:
+                self._render_hud_pill()
             self.root.update_idletasks()
             self.root.update()
         except tk.TclError:

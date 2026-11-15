@@ -15,7 +15,7 @@ APP_NAME = "J.A.R.V.I.S Gesture Interface"
 AUTHOR = "Soumya Shrichandani"
 COPYRIGHT = "Copyright (c) 2026 Soumya Shrichandani. All Rights Reserved."
 WINDOW_WIDTH, WINDOW_HEIGHT = pyautogui.size()
-TARGET_FPS = 60
+TARGET_FPS = 30
 
 # --- PERCEPTION (OneEuroFilter) ---
 ONE_EURO_MIN_CUTOFF = 1.3   # Hz
@@ -55,7 +55,7 @@ COLOR_SCROLL = (255, 0, 255)
 COLOR_TEXT = (255, 255, 255)
 
 # --- SAFETY ---
-FAILSAFE_FPS = 15
+FAILSAFE_FPS = 5
 
 # --- SCREEN ---
 SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
