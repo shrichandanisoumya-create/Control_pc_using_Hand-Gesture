@@ -46,6 +46,8 @@
 | **Webcam** | 480p @ 30 FPS | 720p / 1080p @ 60 FPS |
 | **RAM** | 4 GB | 8 GB+ |
 | **Processor** | Dual-Core Intel/AMD | Quad-Core i5/Ryzen 5 or higher |
+{Tested on Rysen 5 7000 series }
+{needs an good webcamera}
 
 > **Note**: Transparent click-through drawing overlay requires Windows Desktop Window Manager (DWM).
 
