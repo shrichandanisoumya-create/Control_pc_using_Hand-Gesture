@@ -6,23 +6,11 @@
 
 """
 DesktopOverlay — Bulletproof transparent, click-through, full-screen Air-Canvas window.
-
-Fixes applied (v3.2):
-  [FIX 1]  Neon Cyan targeting reticle rendered at every fingertip position while
-           Air-Canvas is active so the user always sees where they are pointing.
-  [FIX 2]  Radial colour wheel: raycast / hover selection now works correctly.
-           draw_color is updated immediately when a colour is locked; a "COLOR LOCKED"
-           HUD pill confirms the selection before the wheel fades out.
-  [FIX 3]  Strict fist-clear: auto-clear timers removed; canvas ONLY clears on an
-           explicit 0.8 s fist hold (handled in system.py) or the 'C' key.
-           clear_canvas() now shows "CANVAS PURGED" pill.
-
-Includes:
-  • Correct DWM transparency (applied after deiconify on live window)
-  • Full-screen freehand drawing with LINE_WIDTH=6, ROUND caps, smooth=True
-  • No auto-shape snapping (ShapeRecognizer never imported)
-  • GTA-V style 5-colour holographic radial colour wheel
-  • Strict fist-clear debounce (no auto-clear timers)
+Performance & Precision Edition (v3.4):
+  • Multi-point spline interpolation for ultra-smooth, organic handwriting lines.
+  • GTA V Radial Wheel with aligned hit-test sectors, visual targeting reticle, and latched mode.
+  • Instant color switching via radial wheel or keyboard keys (1-5).
+  • Zero-stutter rendering with optimized Tkinter item management.
 """
 
 import tkinter as tk
@@ -66,80 +54,71 @@ def _apply_ex_styles(hwnd: int) -> None:
 
 
 # ============================================================================
-# Radial Color Wheel  [FIX 2 — hover selection now works correctly]
+# Radial Color Wheel (Latched & Mathematically Aligned)
 # ============================================================================
 class RadialColorWheel:
     """
     GTA-V weapon-wheel style 5-segment holographic colour selector.
-    Rendered entirely on the Tk canvas.
-
-    FIX 2 changelog:
-    - _segment_at() angle calculation is now stable across all screen quadrants.
-    - update() resets dwell only when the segment genuinely changes (not every frame).
-    - Confirmed colour is immediately applied to draw_color before hiding wheel.
+    Rendered entirely on the Tk canvas with precise hit-testing and aiming reticle.
     """
     COLORS     = config.RADIAL_COLORS   # list of (hex_color, label)
     N          = len(COLORS)
-    RADIUS_OUT = 180    # px outer ring
-    RADIUS_IN  = 60     # px inner dead-zone
-    DWELL_TIME = config.RADIAL_DWELL_TIME   # 0.4 s
+    RADIUS_OUT = config.RADIAL_OUTER_RADIUS      # 185 px
+    RADIUS_IN  = config.RADIAL_DEADZONE_RADIUS   # 55 px
+    DWELL_TIME = config.RADIAL_DWELL_TIME        # 0.3 s
+    ROT_OFFSET = -90.0  # start at 12 o'clock
 
     def __init__(self, canvas: tk.Canvas, screen_w: int, screen_h: int):
         self.canvas   = canvas
         self.cx       = screen_w // 2
         self.cy       = screen_h // 2
         self.visible  = False
-        self._items   = []          # canvas item ids for cleanup
-        self._hovered = None        # currently hovered segment index
+        self._hovered = None
         self._dwell_start = None
-        self._selected_color = None # hex color chosen
+        self._aim_x = None
+        self._aim_y = None
 
-    # ------------------------------------------------------------------ #
-    # Public API
-    # ------------------------------------------------------------------ #
     def show(self):
-        self.visible        = True
-        self._hovered       = None
-        self._dwell_start   = None
-        self._selected_color = None
+        self.visible      = True
+        self._hovered     = None
+        self._dwell_start = None
+        self._aim_x       = self.cx
+        self._aim_y       = self.cy
         self._draw()
 
     def hide(self):
         self.visible = False
         self._erase()
-        self._hovered      = None
-        self._dwell_start  = None
+        self._hovered     = None
+        self._dwell_start = None
 
     def update(self, finger_x: int, finger_y: int) -> str | None:
         """
-        Call every frame with the index fingertip position (screen coords).
-        Returns the selected hex colour string when a selection is confirmed,
-        or None while the user is still choosing.
-
-        [FIX 2] Dwell timer now resets ONLY on genuine segment changes.
+        Feed fingertip coordinates. Returns hex color string when selection is locked.
         """
         if not self.visible:
             return None
 
+        self._aim_x = finger_x
+        self._aim_y = finger_y
         seg = self._segment_at(finger_x, finger_y)
 
         if seg is None:
-            # Cursor is in dead zone or outside wheel — reset dwell but keep
-            # the last hovered segment highlighted so it doesn't flicker.
             if self._hovered is not None:
                 self._hovered     = None
                 self._dwell_start = None
                 self._draw()
+            else:
+                self._draw()
             return None
 
-        # [FIX 2] Only reset the timer when the segment *actually* changes.
         if seg != self._hovered:
             self._hovered     = seg
             self._dwell_start = time.time()
             self._draw()
             return None
 
-        # Same segment — advance dwell timer
+        # Same segment — accumulate dwell timer
         if self._dwell_start is None:
             self._dwell_start = time.time()
 
@@ -156,22 +135,19 @@ class RadialColorWheel:
 
     def _segment_at(self, x: int, y: int) -> int | None:
         """
-        Return segment index (0..N-1) if (x,y) is within the wheel ring, else None.
-        [FIX 2] atan2 result is normalised to [0, 360) correctly.
+        Hit-test sector calculation mathematically synchronized with visual rendering.
         """
         dx = x - self.cx
         dy = y - self.cy
         r  = math.hypot(dx, dy)
-        if r < self.RADIUS_IN or r > self.RADIUS_OUT:
+        if r < self.RADIUS_IN:
             return None
-        # atan2 gives angle in (-180, 180]; shift to [0, 360)
-        angle = (math.degrees(math.atan2(dy, dx)) + 360) % 360
+        # Angle relative to 12 o'clock (-90 deg)
+        angle_math = math.degrees(math.atan2(dy, dx))
+        angle_aligned = (angle_math - self.ROT_OFFSET + 360.0) % 360.0
         seg_size = 360.0 / self.N
-        return int(angle / seg_size) % self.N
+        return int(angle_aligned / seg_size) % self.N
 
-    # ------------------------------------------------------------------ #
-    # Rendering
-    # ------------------------------------------------------------------ #
     def _erase(self):
         self.canvas.delete("radial_wheel")
 
@@ -180,50 +156,57 @@ class RadialColorWheel:
         if not self.visible:
             return
 
-        seg_deg    = 360.0 / self.N
-        rot_offset = -90  # start at 12-o'clock
+        seg_deg = 360.0 / self.N
+
+        # Outer background glow ring
+        self.canvas.create_oval(
+            self.cx - (self.RADIUS_OUT + 15), self.cy - (self.RADIUS_OUT + 15),
+            self.cx + (self.RADIUS_OUT + 15), self.cy + (self.RADIUS_OUT + 15),
+            fill="#050B14", outline="#003344", width=3, tags="radial_wheel"
+        )
 
         for i, (hex_color, label) in enumerate(self.COLORS):
-            start_angle = rot_offset + i * seg_deg
+            start_angle = self.ROT_OFFSET + i * seg_deg
             is_hovered  = (i == self._hovered)
 
-            # Pulsing outer radius for hovered segment
-            r_out = self.RADIUS_OUT + (12 if is_hovered else 0)
+            r_out = self.RADIUS_OUT + (14 if is_hovered else 0)
             r_in  = self.RADIUS_IN
 
-            # Draw the arc slice using polygon approximation
             pts = self._arc_polygon(self.cx, self.cy, r_in, r_out,
                                      start_angle, seg_deg, steps=28)
 
-            fill_color = hex_color
-            outline_w  = 3 if is_hovered else 1
             self.canvas.create_polygon(
-                pts, fill=fill_color,
-                outline="#FFFFFF" if is_hovered else "#555555",
-                width=outline_w,
-                stipple="",          # solid fill
+                pts, fill=hex_color,
+                outline="#FFFFFF" if is_hovered else "#333333",
+                width=3 if is_hovered else 1,
                 tags="radial_wheel"
             )
 
-            # Dwell progress arc (bright white partial ring on hovered slice)
+            # Dwell progress arc
             if is_hovered and dwell_progress > 0.0:
-                self._draw_dwell_arc(start_angle, seg_deg, r_out, dwell_progress)
+                arc_span = seg_deg * dwell_progress
+                arc_pts = self._arc_polygon(self.cx, self.cy,
+                                             r_out - 8, r_out + 4,
+                                             start_angle, arc_span, steps=20)
+                self.canvas.create_polygon(
+                    arc_pts, fill="#FFFFFF", outline="", tags="radial_wheel"
+                )
 
-            # Label text
-            mid_angle_rad = math.radians(start_angle + seg_deg / 2)
-            lx = self.cx + math.cos(mid_angle_rad) * (r_in + (r_out - r_in) * 0.6)
-            ly = self.cy + math.sin(mid_angle_rad) * (r_in + (r_out - r_in) * 0.6)
+            # Segment label
+            mid_rad = math.radians(start_angle + seg_deg / 2)
+            lx = self.cx + math.cos(mid_rad) * (r_in + (r_out - r_in) * 0.58)
+            ly = self.cy + math.sin(mid_rad) * (r_in + (r_out - r_in) * 0.58)
             font_size = 10 if is_hovered else 8
             self.canvas.create_text(
                 lx, ly,
                 text=label.replace(" ", "\n"),
-                fill="#FFFFFF",
+                fill="#FFFFFF" if is_hovered else "#EEEEEE",
                 font=("Consolas", font_size, "bold"),
                 justify="center",
                 tags="radial_wheel"
             )
 
-        # Center dead-zone ring (dark circle)
+        # Center hub
         self.canvas.create_oval(
             self.cx - self.RADIUS_IN, self.cy - self.RADIUS_IN,
             self.cx + self.RADIUS_IN, self.cy + self.RADIUS_IN,
@@ -232,31 +215,28 @@ class RadialColorWheel:
         )
         self.canvas.create_text(
             self.cx, self.cy,
-            text="COLOR\nSELECT",
+            text="POINT TO\nCHOOSE",
             fill="#00FFFF",
-            font=("Consolas", 9, "bold"),
+            font=("Consolas", 8, "bold"),
             justify="center",
             tags="radial_wheel"
         )
 
-    def _draw_dwell_arc(self, start_angle: float, seg_deg: float,
-                         r_out: float, progress: float):
-        """White progress arc along outer edge of hovered segment."""
-        arc_span = seg_deg * progress
-        pts = self._arc_polygon(self.cx, self.cy,
-                                 r_out - 6, r_out + 4,
-                                 start_angle, arc_span, steps=20)
-        self.canvas.create_polygon(
-            pts, fill="#FFFFFF", outline="", tags="radial_wheel"
-        )
+        # Aiming pointer line & reticle
+        if self._aim_x is not None and self._aim_y is not None:
+            self.canvas.create_line(
+                self.cx, self.cy, self._aim_x, self._aim_y,
+                fill="#00FFFF", width=1, dash=(3, 3), tags="radial_wheel"
+            )
+            self.canvas.create_oval(
+                self._aim_x - 8, self._aim_y - 8,
+                self._aim_x + 8, self._aim_y + 8,
+                fill="#FFFFFF", outline="#00FFFF", width=2, tags="radial_wheel"
+            )
 
     @staticmethod
     def _arc_polygon(cx: float, cy: float, r_in: float, r_out: float,
                       start_deg: float, span_deg: float, steps: int = 24) -> list:
-        """
-        Return a flat list of (x,y) coordinates forming a filled arc-wedge polygon
-        (inner radius r_in, outer radius r_out, from start_deg for span_deg degrees).
-        """
         pts = []
         for k in range(steps + 1):
             a = math.radians(start_deg + span_deg * k / steps)
@@ -270,37 +250,22 @@ class RadialColorWheel:
 
 
 # ============================================================================
-# Desktop Overlay
+# Desktop Overlay (Ultra-Smooth Spline Drawing Engine)
 # ============================================================================
 class DesktopOverlay:
     """
-    Transparent, click-through, full-screen Air-Canvas overlay.
-
-    Transparency: background = #010101 (config.OVERLAY_BG), registered as
-    DWM colour key.  Drawing colour = #00FFFF — safely different from key.
-
-    Lifecycle: __init__ → withdrawn.  show()/hide() on DRAW MODE toggle.
-    update() must be called every frame to pump the Tk event loop.
-
-    [FIX 1]  draw_stroke(), hover_reticle(), and erase_at() all render a
-             Neon Cyan targeting reticle at the current fingertip so the user
-             always has a precise crosshair / cursor dot on screen.
-    [FIX 3]  clear_canvas() shows "CANVAS PURGED" and has NO auto-timer.
-             It is ONLY called by explicit 0.8 s fist hold or 'C' key press.
+    Transparent, click-through, full-screen Air-Canvas overlay with high-fidelity
+    spline curve interpolation and zero-lag reticle feedback.
     """
 
-    # Neon reticle dimensions
-    _RETICLE_INNER  = 6    # inner dot radius
-    _RETICLE_OUTER  = 18   # outer ring radius
-    _RETICLE_GAP    = 5    # crosshair gap from center
-    _RETICLE_ARM    = 14   # crosshair arm length beyond outer ring
-    _RETICLE_COLOR  = "#00FFFF"   # Neon Cyan
-    _RETICLE_GLOW   = "#005F7F"   # darker glow halo
+    _RETICLE_INNER  = 6
+    _RETICLE_OUTER  = 18
+    _RETICLE_GAP    = 5
+    _RETICLE_ARM    = 14
+    _RETICLE_COLOR  = "#00FFFF"
+    _RETICLE_GLOW   = "#005F7F"
 
     def __init__(self):
-        # ------------------------------------------------------------------ #
-        # 1. Root window
-        # ------------------------------------------------------------------ #
         self.root = tk.Tk()
         self.root.title("Jarvis_AirCanvas_Overlay")
         self.root.overrideredirect(True)
@@ -312,9 +277,6 @@ class DesktopOverlay:
         self.bg_color = config.OVERLAY_BG  # "#010101"
         self.root.config(bg=self.bg_color)
 
-        # ------------------------------------------------------------------ #
-        # 2. Canvas
-        # ------------------------------------------------------------------ #
         self.canvas = tk.Canvas(
             self.root,
             width=self.width,
@@ -325,10 +287,6 @@ class DesktopOverlay:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # ------------------------------------------------------------------ #
-        # 3. Apply Win32 extended styles before first show
-        #    (WS_EX_LAYERED must exist before -transparentcolor takes effect)
-        # ------------------------------------------------------------------ #
         self.root.update_idletasks()
         try:
             hwnd = _get_toplevel_hwnd(self.root)
@@ -340,34 +298,25 @@ class DesktopOverlay:
         self.root.wm_attributes("-topmost", True)
         self.root.wm_attributes("-alpha", 1.0)
 
-        # ------------------------------------------------------------------ #
-        # 4. Start HIDDEN
-        # ------------------------------------------------------------------ #
         self.is_visible = False
         self.root.withdraw()
 
-        # ------------------------------------------------------------------ #
-        # 5. Drawing state
-        # ------------------------------------------------------------------ #
+        # Continuous spline stroke tracking
+        self.current_stroke_id  = None
+        self.current_stroke_pts = []
         self.xp = None
         self.yp = None
-        self.draw_color = config.COLOR_DRAW_LINE  # active pen colour
+        self.draw_color = config.COLOR_DRAW_LINE
 
-        # ------------------------------------------------------------------ #
-        # 6. HUD pill
-        # ------------------------------------------------------------------ #
+        # HUD pill
         self.pill_text   = ""
         self.pill_expiry = 0.0
         self.pill_color  = config.COLOR_DRAW_LINE
 
-        # ------------------------------------------------------------------ #
-        # 7. Radial wheel
-        # ------------------------------------------------------------------ #
+        # Radial wheel
         self.radial_wheel = RadialColorWheel(self.canvas, self.width, self.height)
 
-        # ------------------------------------------------------------------ #
-        # 8. Save directory
-        # ------------------------------------------------------------------ #
+        # Save directory
         self.drawings_dir = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", config.DRAWINGS_DIR)
         )
@@ -381,7 +330,6 @@ class DesktopOverlay:
     # ======================================================================
 
     def show(self):
-        """Show overlay — re-apply DWM transparency on the live window."""
         if not self.is_visible:
             self.root.deiconify()
             self.root.update_idletasks()
@@ -398,7 +346,6 @@ class DesktopOverlay:
             self.is_visible = True
 
     def hide(self):
-        """Withdraw overlay — desktop is 100% unblocked."""
         if self.is_visible:
             self.lift_pen()
             self.hide_reticles()
@@ -407,180 +354,137 @@ class DesktopOverlay:
             self.is_visible = False
 
     # ======================================================================
-    # Radial Wheel  [FIX 2]
+    # Radial Wheel & Direct Color Control
     # ======================================================================
 
     def open_radial_wheel(self):
-        """Show the GTA-V colour wheel."""
         if not self.radial_wheel.visible:
             self.radial_wheel.show()
 
     def close_radial_wheel(self):
-        """Hide wheel without selecting."""
         if self.radial_wheel.visible:
             self.radial_wheel.hide()
 
     def update_radial_wheel(self, finger_x: int, finger_y: int) -> bool:
-        """
-        Feed the current fingertip position to the wheel.
-        Returns True if a colour was just selected (and closes the wheel).
-
-        [FIX 2] draw_color is immediately applied; pill says "COLOR LOCKED".
-        """
         chosen = self.radial_wheel.update(finger_x, finger_y)
         if chosen is not None:
-            # Immediately update the active drawing colour
             self.draw_color = chosen
-            # Find human-readable label for HUD
-            label = next(
-                (lbl for col, lbl in config.RADIAL_COLORS if col == chosen),
-                chosen
-            )
+            label = next((lbl for col, lbl in config.RADIAL_COLORS if col == chosen), chosen)
             self.show_pill(f"COLOR LOCKED — {label}", color=chosen, duration=2.0)
             return True
         return False
+
+    def set_active_color(self, hex_color: str, label: str = None):
+        """Instant color switch via keyboard or direct call."""
+        self.draw_color = hex_color
+        if label is None:
+            label = next((lbl for col, lbl in config.RADIAL_COLORS if col == hex_color), hex_color)
+        self.show_pill(f"COLOR: {label}", color=hex_color, duration=1.5)
 
     @property
     def radial_active(self) -> bool:
         return self.radial_wheel.visible
 
     # ======================================================================
-    # Drawing tools  [FIX 1 — Neon Cyan targeting reticle on every tool]
+    # High-Fidelity Drawing Engine (Spline Curves & Anti-Stutter)
     # ======================================================================
 
-    def _draw_reticle(self, screen_x: int, screen_y: int,
-                      mode: str = "draw") -> None:
-        """
-        Render a glowing Neon Cyan targeting reticle at (screen_x, screen_y).
-
-        mode="draw"  → solid dot + outer ring + 4-arm crosshair
-        mode="hover" → dual ring + 4-arm crosshair (no solid center)
-        mode="erase" → dashed eraser-radius ring + center cross
-
-        All items tagged "reticle" so hide_reticles() can wipe them atomically.
-        """
+    def _draw_reticle(self, screen_x: int, screen_y: int, mode: str = "draw") -> None:
         x, y = screen_x, screen_y
         tag  = "reticle"
-        dc   = self.draw_color  # match current draw colour
+        dc   = self.draw_color
 
         if mode == "draw":
-            # 1. Glow halo (slightly larger, darker)
-            g = self._RETICLE_OUTER + 4
-            self.canvas.create_oval(
-                x - g, y - g, x + g, y + g,
-                outline=self._RETICLE_GLOW, width=4, tags=tag
-            )
-            # 2. Outer ring
             ro = self._RETICLE_OUTER
-            self.canvas.create_oval(
-                x - ro, y - ro, x + ro, y + ro,
-                outline=dc, width=2, tags=tag
-            )
-            # 3. Solid center dot
             ri = self._RETICLE_INNER
-            self.canvas.create_oval(
-                x - ri, y - ri, x + ri, y + ri,
-                fill=dc, outline="#FFFFFF", width=1, tags=tag
-            )
-            # 4. Crosshair arms (gap + arm length)
+            self.canvas.create_oval(x - ro, y - ro, x + ro, y + ro, outline=dc, width=2, tags=tag)
+            self.canvas.create_oval(x - ri, y - ri, x + ri, y + ri, fill=dc, outline="#FFFFFF", width=1, tags=tag)
             gap = self._RETICLE_GAP
             arm = self._RETICLE_ARM + ro
-            self.canvas.create_line(x - arm, y, x - gap, y,
-                                    fill=dc, width=1, tags=tag)
-            self.canvas.create_line(x + gap, y, x + arm, y,
-                                    fill=dc, width=1, tags=tag)
-            self.canvas.create_line(x, y - arm, x, y - gap,
-                                    fill=dc, width=1, tags=tag)
-            self.canvas.create_line(x, y + gap, x, y + arm,
-                                    fill=dc, width=1, tags=tag)
+            self.canvas.create_line(x - arm, y, x - gap, y, fill=dc, width=1, tags=tag)
+            self.canvas.create_line(x + gap, y, x + arm, y, fill=dc, width=1, tags=tag)
+            self.canvas.create_line(x, y - arm, x, y - gap, fill=dc, width=1, tags=tag)
+            self.canvas.create_line(x, y + gap, x, y + arm, fill=dc, width=1, tags=tag)
 
         elif mode == "hover":
-            # Double-ring targeting reticle (no fill dot)
             ro = self._RETICLE_OUTER
-            self.canvas.create_oval(
-                x - ro, y - ro, x + ro, y + ro,
-                outline=dc, width=2, tags=tag
-            )
-            ri = ro - 8
-            self.canvas.create_oval(
-                x - ri, y - ri, x + ri, y + ri,
-                outline="#FFFFFF", width=1, tags=tag
-            )
+            ri = ro - 7
+            self.canvas.create_oval(x - ro, y - ro, x + ro, y + ro, outline=dc, width=2, tags=tag)
+            self.canvas.create_oval(x - ri, y - ri, x + ri, y + ri, outline="#FFFFFF", width=1, tags=tag)
             arm = self._RETICLE_ARM + ro
             gap = self._RETICLE_GAP
-            self.canvas.create_line(x - arm, y, x - gap, y,
-                                    fill="#FFD700", width=1, tags=tag)
-            self.canvas.create_line(x + gap, y, x + arm, y,
-                                    fill="#FFD700", width=1, tags=tag)
-            self.canvas.create_line(x, y - arm, x, y - gap,
-                                    fill="#FFD700", width=1, tags=tag)
-            self.canvas.create_line(x, y + gap, x, y + arm,
-                                    fill="#FFD700", width=1, tags=tag)
+            self.canvas.create_line(x - arm, y, x - gap, y, fill="#FFD700", width=1, tags=tag)
+            self.canvas.create_line(x + gap, y, x + arm, y, fill="#FFD700", width=1, tags=tag)
+            self.canvas.create_line(x, y - arm, x, y - gap, fill="#FFD700", width=1, tags=tag)
+            self.canvas.create_line(x, y + gap, x, y + arm, fill="#FFD700", width=1, tags=tag)
 
         elif mode == "erase":
-            # Dashed eraser radius ring + small cross at center
             er = config.ERASER_RADIUS
-            self.canvas.create_oval(
-                x - er, y - er, x + er, y + er,
-                outline="#C8C8C8", width=2, dash=(5, 4), tags=tag
-            )
-            self.canvas.create_line(x - 6, y, x + 6, y,
-                                    fill="#FF4444", width=2, tags=tag)
-            self.canvas.create_line(x, y - 6, x, y + 6,
-                                    fill="#FF4444", width=2, tags=tag)
+            self.canvas.create_oval(x - er, y - er, x + er, y + er, outline="#C8C8C8", width=2, dash=(5, 4), tags=tag)
+            self.canvas.create_line(x - 6, y, x + 6, y, fill="#FF4444", width=2, tags=tag)
+            self.canvas.create_line(x, y - 6, x, y + 6, fill="#FF4444", width=2, tags=tag)
 
     def draw_stroke(self, screen_x: int, screen_y: int):
         """
-        1-finger draw.  Uses current draw_color, LINE_WIDTH=6, ROUND caps.
-        No shape snapping — pure freehand.
-
-        [FIX 1] Renders Neon Cyan targeting reticle at current fingertip.
+        Continuous multi-point spline stroke rendering.
+        Eliminates jagged polygon segments and creates smooth fluid handwriting.
         """
-        # Always delete old reticle & eraser ring first
         self.canvas.delete("reticle")
         self.canvas.delete("eraser_ring")
 
-        # Draw the new stroke segment
-        if self.xp is not None and self.yp is not None:
+        if self.current_stroke_id is None:
+            # Start new continuous spline stroke
+            self.current_stroke_pts = [screen_x, screen_y, screen_x + 0.1, screen_y + 0.1]
+            self.current_stroke_id = self.canvas.create_line(
+                self.current_stroke_pts,
+                fill=self.draw_color,
+                width=config.LINE_WIDTH,
+                capstyle=tk.ROUND,
+                joinstyle=tk.ROUND,
+                smooth=True,
+                splinesteps=12,
+                tags="drawing"
+            )
+            self.xp = screen_x
+            self.yp = screen_y
+        else:
             dist = math.hypot(screen_x - self.xp, screen_y - self.yp)
-            if dist >= 1.0:
-                self.canvas.create_line(
-                    self.xp, self.yp, screen_x, screen_y,
-                    fill=self.draw_color,
-                    width=config.LINE_WIDTH,   # 6
-                    capstyle=tk.ROUND,
-                    joinstyle=tk.ROUND,
-                    smooth=True,
-                    tags="drawing"
-                )
-        self.xp = screen_x
-        self.yp = screen_y
+            if dist >= 2.0:
+                self.current_stroke_pts.extend([screen_x, screen_y])
+                self.canvas.coords(self.current_stroke_id, *self.current_stroke_pts)
+                self.xp = screen_x
+                self.yp = screen_y
 
-        # [FIX 1] Render targeting reticle AFTER the stroke so it's on top
+                # Bounded spline chunking: keeps each curve lightweight for continuous silky 60 FPS
+                if len(self.current_stroke_pts) >= 12:
+                    self.current_stroke_pts = [self.xp, self.yp, screen_x + 0.1, screen_y + 0.1]
+                    self.current_stroke_id = self.canvas.create_line(
+                        self.current_stroke_pts,
+                        fill=self.draw_color,
+                        width=config.LINE_WIDTH,
+                        capstyle=tk.ROUND,
+                        joinstyle=tk.ROUND,
+                        smooth=True,
+                        splinesteps=12,
+                        tags="drawing"
+                    )
+
         self._draw_reticle(screen_x, screen_y, mode="draw")
 
     def lift_pen(self):
+        """Finalize current stroke segment."""
+        self.current_stroke_id = None
+        self.current_stroke_pts = []
         self.xp = None
         self.yp = None
 
     def hover_reticle(self, screen_x: int, screen_y: int):
-        """
-        2-finger hover — pen lifted, hover reticle shown.
-
-        [FIX 1] Replaced single-dot with full dual-ring targeting reticle.
-        """
         self.lift_pen()
         self.canvas.delete("reticle")
         self.canvas.delete("eraser_ring")
-        # Render the high-tech hover reticle
         self._draw_reticle(screen_x, screen_y, mode="hover")
 
     def erase_at(self, screen_x: int, screen_y: int, radius: int = config.ERASER_RADIUS):
-        """
-        3-finger eraser — circular erase zone.
-
-        [FIX 1] Eraser-mode reticle shown at fingertip.
-        """
         self.lift_pen()
         self.canvas.delete("reticle")
         self.canvas.delete("eraser_ring")
@@ -588,24 +492,17 @@ class DesktopOverlay:
         x1, y1 = screen_x - radius, screen_y - radius
         x2, y2 = screen_x + radius, screen_y + radius
 
-        # Erase overlapping strokes
         for item in self.canvas.find_overlapping(x1, y1, x2, y2):
             if "drawing" in self.canvas.gettags(item):
                 self.canvas.delete(item)
 
-        # [FIX 1] Eraser reticle (dashed ring + cross)
         self._draw_reticle(screen_x, screen_y, mode="erase")
 
     def clear_canvas(self):
-        """
-        Wipe all drawings.
-
-        [FIX 3] ONLY called by explicit intent (fist 0.8 s hold or 'C' key).
-        No auto-clear timers exist anywhere in the codebase.
-        Shows "CANVAS PURGED" HUD pill on clear.
-        """
         self.lift_pen()
-        self.canvas.delete("all")
+        self.canvas.delete("drawing")
+        self.canvas.delete("reticle")
+        self.canvas.delete("eraser_ring")
         self.show_pill("CANVAS PURGED", color="#FF4444", duration=2.0)
 
     def hide_reticles(self):
@@ -613,7 +510,7 @@ class DesktopOverlay:
         self.canvas.delete("eraser_ring")
 
     # ======================================================================
-    # Save
+    # Save & Quick Actions
     # ======================================================================
 
     def save_artwork(self):
@@ -631,7 +528,6 @@ class DesktopOverlay:
             return None
 
     def trigger_scanline_wipe(self):
-        """'C' key alias — explicit keyboard clear."""
         self.clear_canvas()
 
     # ======================================================================
@@ -687,10 +583,6 @@ class DesktopOverlay:
             self.root.update()
         except tk.TclError:
             pass
-
-    # ======================================================================
-    # Cleanup
-    # ======================================================================
 
     def destroy(self):
         try:

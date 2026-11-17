@@ -101,3 +101,89 @@ class CinematicHUD:
         # 3. Text Label
         cv2.putText(img, f"STATUS: {state}", (cx + 50, cy - 50), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    def draw_cyber_skeleton(self, img, hand_landmarks, state="IDLE", draw_mode=False, sleep_mode=False):
+        """
+        Futuristic Holographic Cyber Skeleton Overlay.
+        Strictly visual styling — renders glowing cybernetic bones, joints, and palm core.
+        Pure visual enhancement: does not alter any mechanics or input handling.
+        """
+        if not hand_landmarks:
+            return
+
+        try:
+            h, w, _ = img.shape
+            pts = [(int(lm.x * w), int(lm.y * h)) for lm in hand_landmarks]
+
+            # Dynamic Cyber Palettes
+            if sleep_mode:
+                bone_color = (0, 160, 220)       # Ambient amber-gold (sleep standby)
+                joint_color = (180, 220, 255)
+                core_color = (0, 120, 200)
+                accent_color = (0, 180, 255)
+            elif draw_mode:
+                bone_color = (255, 230, 0)       # Holographic Neon Cyan
+                joint_color = (255, 255, 255)    # White hot joint nodes
+                core_color = (255, 200, 0)
+                accent_color = (0, 255, 255)     # Laser Gold
+            else:
+                bone_color = (255, 210, 30)      # High-tech Electric Cyan
+                joint_color = (255, 255, 255)
+                core_color = (255, 180, 0)
+                accent_color = (0, 255, 200)
+
+            # 23 High-tech Bone Segments
+            connections = [
+                # Palm carpal frame & transversal arch
+                (0, 1), (0, 5), (0, 17), (0, 9), (5, 9), (9, 13), (13, 17),
+                # Thumb
+                (1, 2), (2, 3), (3, 4),
+                # Index
+                (5, 6), (6, 7), (7, 8),
+                # Middle
+                (9, 10), (10, 11), (11, 12),
+                # Ring
+                (13, 14), (14, 15), (15, 16),
+                # Pinky
+                (17, 18), (18, 19), (19, 20)
+            ]
+
+            # 1. Render Bone Struts
+            for p1_idx, p2_idx in connections:
+                pt1 = pts[p1_idx]
+                pt2 = pts[p2_idx]
+                cv2.line(img, pt1, pt2, bone_color, 1, cv2.LINE_AA)
+
+            # 2. Render Articulated Joint Nodes
+            for idx, pt in enumerate(pts):
+                if idx in (4, 8, 12, 16, 20):
+                    # Fingertip Sensor Ring
+                    cv2.circle(img, pt, 5, accent_color, 1, cv2.LINE_AA)
+                    cv2.circle(img, pt, 2, (255, 255, 255), -1, cv2.LINE_AA)
+                else:
+                    # Joint node
+                    cv2.circle(img, pt, 3, bone_color, 1, cv2.LINE_AA)
+                    cv2.circle(img, pt, 1, (255, 255, 255), -1, cv2.LINE_AA)
+
+            # Special Reticle for Index Fingertip (Laser Pointer / Pen)
+            cv2.circle(img, pts[8], 8, accent_color, 1, cv2.LINE_AA)
+
+            # 3. Palm Cyber Core (Mini Arc-Reactor)
+            # Centroid of wrist (0), index MCP (5), and pinky MCP (17)
+            core_cx = (pts[0][0] + pts[5][0] + pts[17][0]) // 3
+            core_cy = (pts[0][1] + pts[5][1] + pts[17][1]) // 3
+
+            self.pulse_phase += 0.05
+            core_r = int(14 + np.sin(self.pulse_phase * 2) * 2)
+
+            # Inner solid energy emitter
+            cv2.circle(img, (core_cx, core_cy), 4, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(img, (core_cx, core_cy), 7, core_color, 1, cv2.LINE_AA)
+
+            # Rotating outer targeting arcs
+            rot_deg = int((self.pulse_phase * 90) % 360)
+            cv2.ellipse(img, (core_cx, core_cy), (core_r, core_r), rot_deg, 0, 70, accent_color, 1, cv2.LINE_AA)
+            cv2.ellipse(img, (core_cx, core_cy), (core_r, core_r), rot_deg + 120, 0, 70, accent_color, 1, cv2.LINE_AA)
+            cv2.ellipse(img, (core_cx, core_cy), (core_r, core_r), rot_deg + 240, 0, 70, accent_color, 1, cv2.LINE_AA)
+        except Exception:
+            pass

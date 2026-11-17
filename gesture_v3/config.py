@@ -5,7 +5,7 @@
 # ==============================================================================
 
 """
-Centralized source of truth for all physics, UI, and logic constants.
+Centralized source of truth for all physics, UI, logic, and gesture constants.
 """
 import math
 import pyautogui
@@ -46,7 +46,7 @@ SCROLL_DEADZONE = 0.05
 DRAG_TOGGLE_COOLDOWN = 1.0
 COLOR_DRAG_ACTIVE = (0, 255, 0)
 
-# --- UI COLORS (BGR) ---
+# --- UI COLORS (BGR for OpenCV) ---
 COLOR_IDLE = (255, 255, 0)
 COLOR_MOVE = (255, 255, 255)
 COLOR_CLICK = (0, 0, 255)
@@ -54,7 +54,7 @@ COLOR_RIGHT_CLICK = (255, 0, 0)
 COLOR_SCROLL = (255, 0, 255)
 COLOR_TEXT = (255, 255, 255)
 
-# --- SAFETY ---
+# --- SAFETY & TELEMETRY ---
 FAILSAFE_FPS = 5
 
 # --- SCREEN ---
@@ -62,19 +62,22 @@ SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
 
 # --- AIR CANVAS COORDINATE MAPPING ---
 # Active zone margins: amount to trim from each edge of the camera frame.
-# 0.10 = 10% margin each side → user only needs to move hand in 80% of frame width/height.
-# This gives natural, effort-free corner-to-corner desktop coverage.
+# 0.10 = 10% margin each side → user only needs to move hand in central 80% of frame.
 CANVAS_MARGIN_X = 0.10
 CANVAS_MARGIN_Y = 0.10
 
+# --- SLEEP / WAKE GESTURE (Thumbs-Up) ---
+SLEEP_TOGGLE_HOLD_TIME = 0.45    # Smooth & responsive hold time (seconds)
+SLEEP_TOGGLE_COOLDOWN  = 0.80    # Cooldown between sleep state switches (seconds)
+
 # --- MODE SWITCHING (Rock Sign) ---
-DRAW_TOGGLE_HOLD_TIME = 0.8    # seconds of continuous hold to toggle
+DRAW_TOGGLE_HOLD_TIME = 0.8    # seconds of continuous hold to toggle Air Canvas
 DRAW_TOGGLE_COOLDOWN  = 1.5    # post-toggle cooldown (seconds)
 
 # --- PEN SMOOTHER (AdaptiveSmoother) ---
-MICRO_DEADZONE_PIXELS = 1.5    # sub-pixel tremor lock (tighter than before)
-SMOOTHER_BASE_ALPHA   = 0.55   # strong smoothing at rest
-SMOOTHER_FAST_ALPHA   = 0.90   # snappy responsiveness during fast strokes
+MICRO_DEADZONE_PIXELS = 1.0    # ultra-tight sub-pixel tremor lock
+SMOOTHER_BASE_ALPHA   = 0.65   # strong smoothing for slow precision lines
+SMOOTHER_FAST_ALPHA   = 0.95   # snappy zero-lag tracking for quick strokes
 
 # --- DRAWING STYLE ---
 COLOR_DRAW_LINE = "#00FFFF"    # Default Neon Cyan
@@ -82,14 +85,17 @@ LINE_WIDTH      = 6            # Crisp holographic thickness
 OVERLAY_BG      = "#010101"    # Transparent color key
 
 # --- ERASER ---
-ERASER_RADIUS = 25
+ERASER_RADIUS = 30
 
 # --- FIST CLEAR (must hold continuously for this long) ---
-FIST_CLEAR_HOLD_TIME = 0.8     # seconds (increased from 0.5 to prevent accidents)
+FIST_CLEAR_HOLD_TIME = 0.8     # seconds to hold Closed Fist to wipe canvas
 
 # --- RADIAL COLOR WHEEL ---
-RADIAL_TRIGGER_HOLD_TIME = 0.6  # seconds to hold Call Sign before wheel appears
-RADIAL_DWELL_TIME        = 0.4  # seconds to hover a segment to select it
+RADIAL_TRIGGER_HOLD_TIME = 0.35 # seconds to hold Call Sign before wheel latches open
+RADIAL_DWELL_TIME        = 0.30 # seconds to hover a segment to lock colour
+RADIAL_DEADZONE_RADIUS   = 55   # px inner ring
+RADIAL_OUTER_RADIUS      = 185  # px outer ring
+
 RADIAL_COLORS = [
     ("#00FFFF", "JARVIS CYAN"),
     ("#FF2A2A", "STARK RED"),
@@ -97,6 +103,15 @@ RADIAL_COLORS = [
     ("#00FF66", "MATRIX GREEN"),
     ("#BF00FF", "HOLOGRAM PURPLE"),
 ]
+
+# Keyboard quick-switch mapping for Air-Canvas colors
+KEYBOARD_COLOR_MAP = {
+    ord('1'): ("#00FFFF", "JARVIS CYAN"),
+    ord('2'): ("#FF2A2A", "STARK RED"),
+    ord('3'): ("#FFD700", "IRON GOLD"),
+    ord('4'): ("#00FF66", "MATRIX GREEN"),
+    ord('5'): ("#BF00FF", "HOLOGRAM PURPLE"),
+}
 
 # --- SAVE ---
 DRAWINGS_DIR = "drawings"
